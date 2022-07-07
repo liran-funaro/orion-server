@@ -167,7 +167,7 @@ func NodeRecoveryWithCatchup(t *testing.T, victimIsLeader bool) {
 		require.Eventually(t, func() bool {
 			dataEnv, err = c.Servers[follower1].QueryData(t, worldstate.DefaultDBName, strconv.Itoa(key), "admin")
 			return dataEnv != nil && dataEnv.GetResponse().GetValue() != nil && err == nil
-		}, 30*time.Second, 100*time.Millisecond)
+		}, 60*time.Second, 100*time.Millisecond)
 		dataResp := dataEnv.GetResponse().GetValue()
 		require.Equal(t, dataResp, data)
 	}

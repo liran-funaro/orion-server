@@ -666,7 +666,7 @@ func TestBlockReplicator_3Node_LeadershipLossRecovery(t *testing.T) {
 	numSubmittedAfterRecovery := atomic.LoadUint64(&numSubmitted)
 	require.Eventually(t, func() bool {
 		return atomic.LoadUint64(&numSubmitted) > numSubmittedAfterRecovery+1000
-	}, 30*time.Second, 100*time.Millisecond)
+	}, 120*time.Second, 100*time.Millisecond)
 
 	close(stopCh)
 	t.Log("before stopped: ")

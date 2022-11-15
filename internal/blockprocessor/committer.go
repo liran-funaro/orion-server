@@ -1,5 +1,6 @@
 // Copyright IBM Corp. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+
 package blockprocessor
 
 import (
@@ -31,7 +32,7 @@ type committer struct {
 	blockStore      *blockstore.Store
 	provenanceStore *provenance.Store
 	stateTrieStore  mptrie.Store
-	stateTrie       *mptrie.MPTrie
+	stateTrie       *mptrie.MPTrie // may be nil when MPTrie disabled
 	logger          *logger.SugarLogger
 }
 
@@ -56,9 +57,12 @@ func (c *committer) commitBlock(block *types.Block) error {
 
 	start = time.Now()
 	// Update state trie with expected world state db changes
-	if err := c.applyBlockOnStateTrie(dbsUpdates); err != nil {
-		panic(err)
+	if !c.stateTrieStore.IsDisabled() { // may be nil when MPTrie disabled
+		if err := c.applyBlockOnStateTrie(dbsUpdates); err != nil {
+			panic(err)
+		}
 	}
+
 	stateTrieRootHash, err := c.stateTrie.Hash()
 	if err != nil {
 		panic(err)
@@ -85,12 +89,15 @@ func (c *committer) commitBlock(block *types.Block) error {
 		return err
 	}
 
-	start = time.Now()
+
 	// Commit state trie changes to trie store
-	if err = c.commitTrie(block.GetHeader().GetBaseHeader().GetNumber()); err != nil {
-		return err
+	if !c.stateTrieStore.IsDisabled() {
+		start = time.Now()
+		if err = c.commitTrie(block.GetHeader().GetBaseHeader().GetNumber()); err != nil {
+			return err
+		}
+		utils.Stats.UpdateStateTrieCommitTime(time.Since(start))
 	}
-	utils.Stats.UpdateStateTrieCommitTime(time.Since(start))
 
 	return nil
 }
@@ -296,10 +303,12 @@ func (c *committer) constructDBAndProvenanceEntries(block *types.Block) (map[str
 	return dbsUpdates, provenanceData, nil
 }
 
+// When the MP-Trie is disabled, this is never called
 func (c *committer) applyBlockOnStateTrie(worldStateUpdates map[string]*worldstate.DBUpdates) error {
 	return ApplyBlockOnStateTrie(c.stateTrie, worldStateUpdates)
 }
 
+// When the MP-Trie is disabled, this is never called
 func (c *committer) commitTrie(height uint64) error {
 	return c.stateTrie.Commit(height)
 }

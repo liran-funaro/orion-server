@@ -16,10 +16,11 @@ import (
 )
 
 type dataTxValidator struct {
-	db              worldstate.DB
-	identityQuerier *identity.Querier
-	sigValidator    *txSigValidator
-	logger          *logger.SugarLogger
+	db                           worldstate.DB
+	identityQuerier              *identity.Querier
+	sigValidator                 *txSigValidator
+	logger                       *logger.SugarLogger
+	disableCommitPhaseValidation bool
 }
 
 func (v *dataTxValidator) validate(txEnv *types.DataTxEnvelope, userIDsWithValidSign []string, pendingOps *pendingOperations) (*types.ValidationInfo, error) {
@@ -102,6 +103,21 @@ func (v *dataTxValidator) validateSignatures(txEnv *types.DataTxEnvelope) ([]str
 		userIDsWithValidSign = append(userIDsWithValidSign, userID)
 	}
 
+	return userIDsWithValidSign, &types.ValidationInfo{Flag: types.Flag_VALID}, nil
+}
+
+func (v *dataTxValidator) commitPhaseValidateSignatures(txEnv *types.DataTxEnvelope) ([]string, *types.ValidationInfo, error) {
+	if !v.disableCommitPhaseValidation {
+		return v.validateSignatures(txEnv)
+	}
+
+	// Just return valid signature
+	userIDsWithValidSign := make([]string, len(txEnv.Signatures))
+	i := 0
+	for userID, _ := range txEnv.Signatures {
+		userIDsWithValidSign[i] = userID
+		i++
+	}
 	return userIDsWithValidSign, &types.ValidationInfo{Flag: types.Flag_VALID}, nil
 }
 

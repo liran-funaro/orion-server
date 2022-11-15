@@ -88,6 +88,7 @@ func newTransactionProcessor(conf *txProcessorConfig) (*transactionProcessor, er
 			DB:     conf.db,
 			Logger: conf.logger,
 		},
+		conf.config.LocalConfig.Experimental.DisableCommitPhaseSigValidation,
 	)
 
 	p.blockProcessor = blockprocessor.New(

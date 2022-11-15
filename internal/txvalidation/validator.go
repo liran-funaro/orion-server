@@ -35,7 +35,7 @@ type Config struct {
 }
 
 // NewValidator creates a new Validator
-func NewValidator(conf *Config) *Validator {
+func NewValidator(conf *Config, disableCommitPhaseValidation bool) *Validator {
 	idQuerier := identity.NewQuerier(conf.DB)
 	txSigValidator := &txSigValidator{
 		sigVerifier: cryptoservice.NewVerifier(idQuerier, conf.Logger),
@@ -66,10 +66,11 @@ func NewValidator(conf *Config) *Validator {
 		},
 
 		dataTxValidator: &dataTxValidator{
-			db:              conf.DB,
-			identityQuerier: idQuerier,
-			sigValidator:    txSigValidator,
-			logger:          conf.Logger,
+			db:                           conf.DB,
+			identityQuerier:              idQuerier,
+			sigValidator:                 txSigValidator,
+			logger:                       conf.Logger,
+			disableCommitPhaseValidation: disableCommitPhaseValidation,
 		},
 
 		signValidator: txSigValidator,
@@ -194,7 +195,8 @@ func (v *Validator) parallelSigValidation(dataTxEnvs []*types.DataTxEnvelope) ([
 		go func(txEnv *types.DataTxEnvelope, txNum int) {
 			defer wg.Done()
 
-			usersWithValidSignTx, vInfo, vErr := v.dataTxValidator.validateSignatures(txEnv)
+			usersWithValidSignTx, vInfo, vErr := v.dataTxValidator.commitPhaseValidateSignatures(txEnv)
+
 			if vErr != nil {
 				errorPerTx[txNum] = vErr
 				return

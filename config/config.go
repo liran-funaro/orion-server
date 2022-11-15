@@ -24,6 +24,10 @@ type Configurations struct {
 	JoinBlock    *types.Block
 }
 
+type ExperimentalConf struct {
+	DisableCommitPhaseSigValidation bool
+}
+
 // LocalConfiguration holds the local configuration of the server.
 // These definitions may vary from server to server, and are defined independently for each server.
 type LocalConfiguration struct {
@@ -32,6 +36,7 @@ type LocalConfiguration struct {
 	Replication   ReplicationConf
 	Bootstrap     BootstrapConf
 	Prometheus    NetworkConf
+	Experimental  ExperimentalConf
 }
 
 // ReplicationConf provides local configuration parameters for replication and server to server communication.

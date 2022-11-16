@@ -91,7 +91,7 @@ type AdminConf struct {
 type LedgerConf struct {
 	// StateMerklePatriciaTrieDisabled disables the state Merkle-Patricia-Trie construction.
 	// With MP-Trie construction disabled, the block's BlockHeader.StateMerkelTreeRootHash field will be nil.
-	// This flag takes affect on deployment (bootstrap) only, from the first (genesis) block.
+	// This flag takes effect on deployment (bootstrap) only, from the first (genesis) block.
 	// The value of this flag cannot be changed during run-time.
 	StateMerklePatriciaTrieDisabled bool
 }

@@ -52,6 +52,11 @@ type BlockProcessorStats struct {
 	transactionPerBlock           prometheus.Histogram
 	blockSizeBytes                prometheus.Histogram
 	transactionCount              *prometheus.CounterVec
+	blockDequeTime                prometheus.Histogram
+	blockConfigChangeTime         prometheus.Histogram
+	blockReplyTime                prometheus.Histogram
+	blockInvokeListenersTime      prometheus.Histogram
+	raftEventTime                 prometheus.Histogram
 }
 
 func newBlockProcessorStats() *BlockProcessorStats {
@@ -176,6 +181,46 @@ func newBlockProcessorStats() *BlockProcessorStats {
 			},
 			[]string{"validation_code", "transaction_type"},
 		),
+		blockDequeTime: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "block",
+				Name:      "deque_time",
+				Help:      "The time taken in seconds to deque a block",
+				Buckets:   timeBuckets,
+			},
+		),
+		blockConfigChangeTime: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "block",
+				Name:      "config_change_time",
+				Help:      "The time taken in seconds to change config after a block commit",
+				Buckets:   timeBuckets,
+			},
+		),
+		blockReplyTime: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "block",
+				Name:      "reply_time",
+				Help:      "The time taken in seconds to reply after a block commit",
+				Buckets:   timeBuckets,
+			},
+		),
+		blockInvokeListenersTime: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "block",
+				Name:      "invoke_listeners_time",
+				Help:      "The time taken in seconds to invoke listeners after a block commit",
+				Buckets:   timeBuckets,
+			},
+		),
+		raftEventTime: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "block",
+				Name:      "raft_event_time",
+				Help:      "The time taken in seconds to handle raft event",
+				Buckets:   timeBuckets,
+			},
+		),
 	}
 }
 
@@ -225,6 +270,26 @@ func (s *BlockProcessorStats) UpdateWorldStateCommitTime(t time.Duration) {
 
 func (s *BlockProcessorStats) UpdateStateTrieCommitTime(t time.Duration) {
 	s.stateTrieCommitTime.Observe(t.Seconds())
+}
+
+func (s *BlockProcessorStats) UpdateBlockDequeTime(t time.Duration) {
+	s.blockDequeTime.Observe(t.Seconds())
+}
+
+func (s *BlockProcessorStats) UpdateConfigChangeTime(t time.Duration) {
+	s.blockConfigChangeTime.Observe(t.Seconds())
+}
+
+func (s *BlockProcessorStats) UpdateBlockReplyTime(t time.Duration) {
+	s.blockReplyTime.Observe(t.Seconds())
+}
+
+func (s *BlockProcessorStats) UpdateBlockInvokeListenersTime(t time.Duration) {
+	s.blockInvokeListenersTime.Observe(t.Seconds())
+}
+
+func (s *BlockProcessorStats) UpdateRaftEventTime(t time.Duration) {
+	s.raftEventTime.Observe(t.Seconds())
 }
 
 func (s *BlockProcessorStats) UpdateTransactionsPerBlock(size int) {

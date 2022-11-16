@@ -433,7 +433,7 @@ Event_Loop:
 			}
 
 			br.raftNode.Advance()
-
+			utils.Stats.UpdateRaftEventTime(time.Since(startStoring))
 		case <-br.stopCh:
 			br.lg.Info("Stopping block replicator")
 			break Event_Loop

@@ -433,7 +433,7 @@ Event_Loop:
 			}
 
 			br.raftNode.Advance()
-			utils.Stats.UpdateRaftEventTime(time.Since(startStoring))
+
 		case <-br.stopCh:
 			br.lg.Info("Stopping block replicator")
 			break Event_Loop
@@ -1183,10 +1183,8 @@ func (br *BlockReplicator) commitBlock(block *types.Block, updateConfig bool) er
 		blockNumber, block.GetConsensusMetadata())
 
 	// we can only get a valid config transaction
-	utils.Stats.UpdateOneBlockQueueSize(br.oneQueueBarrier.Size())
-	enqueueStart := time.Now()
+	utils.Stats.QueueSize("one_block", br.oneQueueBarrier.Size())
 	reConfig, err := br.oneQueueBarrier.EnqueueWait(block)
-	utils.Stats.UpdateBlockEnqueueTime(time.Since(enqueueStart))
 	if err != nil {
 		return err
 	}

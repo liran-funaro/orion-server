@@ -260,27 +260,19 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 		return nil, errors.Errorf("unexpected transaction type")
 	}
 
-	start := time.Now()
-	err := constants.SafeURLSegmentNZ(txID)
-	utils.Stats.TxCommitTime("url-segment", time.Since(start))
-	if err != nil {
+	if err := constants.SafeURLSegmentNZ(txID); err != nil {
 		return nil, &internalerror.BadRequestError{ErrMsg: errors.WithMessage(err, "bad TxId").Error()}
 	}
 
-	start = time.Now()
-	leaderErr := t.IsLeader()
-	utils.Stats.TxCommitTime("is-leader", time.Since(start))
-	if leaderErr != nil {
-		return nil, leaderErr
+	if err := t.IsLeader(); err != nil {
+		return nil, err
 	}
 
-	start = time.Now()
+	start := time.Now()
 	t.Lock()
 	utils.Stats.TxCommitTime("lock-wait", time.Since(start))
 
-	start = time.Now()
 	duplicate, err := t.isTxIDDuplicate(txID)
-	utils.Stats.TxCommitTime("is-tx-id-duplicate", time.Since(start))
 	if err != nil {
 		t.Unlock()
 		return nil, err
@@ -290,40 +282,28 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 		return nil, &internalerror.DuplicateTxIDError{TxID: txID}
 	}
 
-	start = time.Now()
-	isFull := t.txQueue.IsFull()
-	utils.Stats.TxCommitTime("is-tx-queue-full", time.Since(start))
-	if isFull {
+	if t.txQueue.IsFull() {
 		t.Unlock()
 		return nil, fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
 	}
 
-	start = time.Now()
 	jsonBytes, err := json.MarshalIndent(tx, "", "\t")
-	utils.Stats.TxCommitTime("marshal-tx", time.Since(start))
 	if err != nil {
 		t.Unlock()
 		return nil, fmt.Errorf("failed to marshal transaction: %v", err)
 	}
 	t.logger.Debugf("enqueuing transaction %s\n", string(jsonBytes))
 
-	enqueueStart := time.Now()
 	t.txQueue.Enqueue(tx)
-	utils.Stats.UpdateTxEnqueueTime(time.Since(enqueueStart))
-	utils.Stats.UpdateTxQueueSize(t.txQueue.Size())
+	utils.Stats.QueueSize("tx", t.txQueue.Size())
 	t.logger.Debug("transaction is enqueued for re-ordering")
 
-	start = time.Now()
 	promise := queue.NewCompletionPromise(timeout)
 	// TODO: add limit on the number of pending sync tx
-	sz := t.pendingTxs.Add(txID, promise)
-	utils.Stats.QueueSize("pending", sz)
-	utils.Stats.TxCommitTime("append-promise", time.Since(start))
+	t.pendingTxs.Add(txID, promise)
 	t.Unlock()
 
-	start = time.Now()
 	receipt, err := promise.Wait()
-	utils.Stats.TxCommitTime("wait-promise", time.Since(start))
 
 	if err != nil {
 		return nil, err
@@ -398,9 +378,6 @@ func (t *transactionProcessor) Close() error {
 }
 
 func (t *transactionProcessor) IsLeader() *internalerror.NotLeaderError {
-	//t.Lock()
-	//defer t.Unlock()
-
 	return t.blockReplicator.IsLeader()
 }
 

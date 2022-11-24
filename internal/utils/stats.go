@@ -53,16 +53,10 @@ type BlockProcessorStats struct {
 	blockSizeBytes                prometheus.Histogram
 	queueSize                     *prometheus.GaugeVec
 	transactionCount              *prometheus.CounterVec
-	blockDequeTime                prometheus.Histogram
-	blockEnqueueTime              prometheus.Histogram
 	blockConfigChangeTime         prometheus.Histogram
 	blockReplyTime                prometheus.Histogram
 	blockInvokeListenersTime      prometheus.Histogram
 	raftEventTime                 prometheus.Histogram
-	batchDequeueTime              prometheus.Histogram
-	batchEnqueueTime              prometheus.Histogram
-	txEnqueueTime                 prometheus.Histogram
-	txDequeueTime                 prometheus.Histogram
 	txCommitHandlingTime          *prometheus.HistogramVec
 }
 
@@ -220,54 +214,6 @@ func newBlockProcessorStats() *BlockProcessorStats {
 				Buckets:   timeBuckets,
 			},
 		),
-		batchDequeueTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "batch_dequeue_time",
-				Help:      "The time taken in seconds to dequeue from batch",
-				Buckets:   timeBuckets,
-			},
-		),
-		batchEnqueueTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "batch_enqueue_time",
-				Help:      "The time taken in seconds to enqueue from batch",
-				Buckets:   timeBuckets,
-			},
-		),
-		txDequeueTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "tx_dequeue_time",
-				Help:      "The time taken in seconds to dequeue from tx",
-				Buckets:   timeBuckets,
-			},
-		),
-		txEnqueueTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "tx_enqueue_time",
-				Help:      "The time taken in seconds to enqueue from tx",
-				Buckets:   timeBuckets,
-			},
-		),
-		blockDequeTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "one_block_dequeue_time",
-				Help:      "The time taken in seconds to dequeue a block",
-				Buckets:   timeBuckets,
-			},
-		),
-		blockEnqueueTime: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Namespace: "block",
-				Name:      "one_block_enqueue_time",
-				Help:      "The time taken in seconds to enqueue a block",
-				Buckets:   timeBuckets,
-			},
-		),
 		queueSize: promauto.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: "block",
@@ -362,42 +308,6 @@ func (s *BlockProcessorStats) UpdateBlockSizeBytes(size int64) {
 
 func (s *BlockProcessorStats) IncrementTransactionCount(flag types.Flag, txType string) {
 	s.transactionCount.WithLabelValues(flag.String(), txType).Inc()
-}
-
-func (s *BlockProcessorStats) UpdateBatchEnqueueTime(t time.Duration) {
-	s.batchEnqueueTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateBatchDequeueTime(t time.Duration) {
-	s.batchDequeueTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateTxEnqueueTime(t time.Duration) {
-	s.txEnqueueTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateTxDequeueTime(t time.Duration) {
-	s.txDequeueTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateBlockDequeTime(t time.Duration) {
-	s.blockDequeTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateBlockEnqueueTime(t time.Duration) {
-	s.blockEnqueueTime.Observe(t.Seconds())
-}
-
-func (s *BlockProcessorStats) UpdateTxQueueSize(size int) {
-	s.QueueSize("tx", size)
-}
-
-func (s *BlockProcessorStats) UpdateBatchQueueSize(size int) {
-	s.QueueSize("batch", size)
-}
-
-func (s *BlockProcessorStats) UpdateOneBlockQueueSize(size int) {
-	s.QueueSize("one", size)
 }
 
 func (s *BlockProcessorStats) QueueSize(label string, size int) {

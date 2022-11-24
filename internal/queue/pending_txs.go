@@ -24,12 +24,11 @@ func NewPendingTxs(logger *logger.SugarLogger) *PendingTxs {
 	}
 }
 
-func (p *PendingTxs) Add(txID string, promise *CompletionPromise) int {
+func (p *PendingTxs) Add(txID string, promise *CompletionPromise) {
 	p.Lock()
 	defer p.Unlock()
 
 	p.txs[txID] = promise
-	return len(p.txs)
 }
 
 // DoneWithReceipt is called after the commit of a block.

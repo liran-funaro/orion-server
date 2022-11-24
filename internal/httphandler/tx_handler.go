@@ -20,10 +20,7 @@ type txHandler struct {
 // HandleTransaction handles transaction submission
 func (t *txHandler) handleTransaction(w http.ResponseWriter, request *http.Request, tx interface{}, timeout time.Duration) {
 	// If timeout == 0, tx is async, otherwise it is synchronous.
-	start := time.Now()
 	resp, err := t.db.SubmitTransaction(tx, timeout)
-	utils.Stats.TxCommitTime("db-submit-tx", time.Since(start))
-
 	if err != nil {
 		switch err.(type) {
 		case *internalerror.BadRequestError:

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hyperledger-labs/orion-server/config"
-
 	"github.com/hyperledger-labs/orion-server/internal/blockstore"
 	"github.com/hyperledger-labs/orion-server/internal/mptrie"
 	"github.com/hyperledger-labs/orion-server/internal/mtree"
@@ -104,9 +103,7 @@ func (b *BlockProcessor) Start() {
 		default:
 			// The replication layer go-routine that enqueued the block will be blocked until after commit; it must be
 			// released by calling OneQueueBarrier.Reply().
-			dequeStart := time.Now()
 			blockData, err := b.blockOneQueueBarrier.Dequeue()
-			utils.Stats.UpdateBlockDequeTime(time.Since(dequeStart))
 			if err != nil {
 				// when the queue is closed during the teardown/cleanup
 				b.logger.Debugf("OneQueueBarrier error: %s", err)
@@ -120,7 +117,6 @@ func (b *BlockProcessor) Start() {
 
 			// Detect config changes that affect the replication component and return an appropriate non-nil object
 			// to instruct it to reconfigure itself. Only valid config transactions are passed on.
-			configStart := time.Now()
 			var reConfig interface{}
 			switch block.Payload.(type) {
 			case *types.Block_ConfigTxEnvelope:
@@ -128,26 +124,20 @@ func (b *BlockProcessor) Start() {
 					reConfig = block.GetConfigTxEnvelope().GetPayload().GetNewConfig()
 				}
 			}
-			utils.Stats.UpdateConfigChangeTime(time.Since(configStart))
-
 			// The replication layer go-routine is blocked until after commit, and is released by calling Reply().
 			// The post-commit listeners are called after the replication layer go-routine is released. This is an
 			// optimization, as post-commit processing can proceed in parallel with the replication go-routine handling
 			// the next block.
-			replyStart := time.Now()
 			err = b.blockOneQueueBarrier.Reply(reConfig)
 			if err != nil {
 				// when the queue is closed during the teardown/cleanup
 				b.logger.Debugf("OneQueueBarrier error: %s", err)
 				continue
 			}
-			utils.Stats.UpdateBlockReplyTime(time.Since(replyStart))
 
-			invokeStart := time.Now()
 			if err = b.listeners.invoke(block); err != nil {
 				panic(err)
 			}
-			utils.Stats.UpdateBlockInvokeListenersTime(time.Since(invokeStart))
 		}
 	}
 }

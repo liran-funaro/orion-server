@@ -268,10 +268,10 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 	}
 
 	start = time.Now()
-	err = t.IsLeader()
+	leaderErr := t.IsLeader()
 	utils.Stats.TxCommitTime("is-leader", time.Since(start))
-	if err != nil {
-		return nil, err
+	if leaderErr != nil {
+		return nil, leaderErr
 	}
 
 	start = time.Now()

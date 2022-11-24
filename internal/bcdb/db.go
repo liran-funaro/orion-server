@@ -16,6 +16,7 @@ import (
 	"github.com/hyperledger-labs/orion-server/internal/identity"
 	mptrieStore "github.com/hyperledger-labs/orion-server/internal/mptrie/store"
 	"github.com/hyperledger-labs/orion-server/internal/provenance"
+	"github.com/hyperledger-labs/orion-server/internal/utils"
 	"github.com/hyperledger-labs/orion-server/internal/worldstate"
 	"github.com/hyperledger-labs/orion-server/internal/worldstate/leveldb"
 	"github.com/hyperledger-labs/orion-server/pkg/certificateauthority"
@@ -511,13 +512,17 @@ func (d *db) GetDBIndex(dbName, querierUserID string) (*types.GetDBIndexResponse
 // treated as a sync submission. When a timeout occurs with the sync submission, a
 // timeout error will be returned
 func (d *db) SubmitTransaction(tx interface{}, timeout time.Duration) (*types.TxReceiptResponseEnvelope, error) {
+	start := time.Now()
 	receipt, err := d.txProcessor.SubmitTransaction(tx, timeout)
+	utils.Stats.TxCommitTime("submit-tx-processor", time.Since(start))
 	if err != nil {
 		return nil, err
 	}
 
+	start = time.Now()
 	receipt.Header = d.responseHeader()
 	sign, err := d.signature(receipt)
+	utils.Stats.TxCommitTime("sign-response", time.Since(start))
 	if err != nil {
 		return nil, err
 	}

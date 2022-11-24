@@ -34,16 +34,16 @@ type SignatureVerifier struct {
 }
 
 func (sv *SignatureVerifier) GetCert(userID string) (*x509.Certificate, error) {
-	cert, ok := sv.certCache.Load(userID)
-	if ok {
-		return cert.(*x509.Certificate), nil
-	}
+	//cert, ok := sv.certCache.Load(userID)
+	//if ok {
+	//	return cert.(*x509.Certificate), nil
+	//}
 
 	newCert, err := sv.userDBQuerier.GetCertificate(userID)
 	if err != nil {
 		return nil, err
 	}
-	sv.certCache.Store(userID, newCert)
+	//sv.certCache.Store(userID, newCert)
 	return newCert, nil
 }
 

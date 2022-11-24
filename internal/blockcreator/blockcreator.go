@@ -3,6 +3,8 @@
 package blockcreator
 
 import (
+	"time"
+
 	"github.com/hyperledger-labs/orion-server/internal/blockstore"
 	ierrors "github.com/hyperledger-labs/orion-server/internal/errors"
 	"github.com/hyperledger-labs/orion-server/internal/queue"
@@ -90,7 +92,9 @@ func (b *BlockCreator) Start() {
 			return
 
 		default:
+			startDequeue := time.Now()
 			txBatch := b.txBatchQueue.Dequeue()
+			utils.Stats.UpdateBatchDequeueTime(time.Since(startDequeue))
 			if txBatch == nil {
 				// when the queue is closed during the teardown/cleanup,
 				// the dequeued txBatch would be nil.

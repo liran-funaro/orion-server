@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/hyperledger-labs/orion-server/internal/bcdb"
@@ -136,7 +137,12 @@ func (d *dataRequestHandler) dataRangeQuery(response http.ResponseWriter, reques
 }
 
 func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, request *http.Request) {
+	totalStart := time.Now()
+	defer utils.Stats.TxCommitTime("all", time.Since(totalStart))
+
+	start := time.Now()
 	timeout, err := validateAndParseTxPostHeader(&request.Header)
+	utils.Stats.TxCommitTime("parse", time.Since(start))
 	if err != nil {
 		utils.SendHTTPResponse(response, http.StatusBadRequest, &types.HttpResponseErr{ErrMsg: err.Error()})
 		return
@@ -145,14 +151,19 @@ func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, reque
 	// requestData := json.NewDecoder(request.Body)
 	// requestData.DisallowUnknownFields()
 
+	start = time.Now()
 	requestBody, err := ioutil.ReadAll(request.Body)
+	utils.Stats.TxCommitTime("read", time.Since(start))
 	if err != nil {
 		utils.SendHTTPResponse(response, http.StatusBadRequest,
 			&types.HttpResponseErr{ErrMsg: err.Error()})
 	}
 
 	txEnv := &types.DataTxEnvelope{}
-	if err := protojson.Unmarshal(requestBody, txEnv); err != nil {
+	start = time.Now()
+	err = protojson.Unmarshal(requestBody, txEnv)
+	utils.Stats.TxCommitTime("unmarshal", time.Since(start))
+	if err != nil {
 		utils.SendHTTPResponse(response, http.StatusBadRequest, &types.HttpResponseErr{ErrMsg: err.Error()})
 		return
 	}
@@ -169,6 +180,7 @@ func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, reque
 		return
 	}
 
+	start = time.Now()
 	var notSigned []string
 	for _, user := range txEnv.Payload.MustSignUserIds {
 		if user == "" {
@@ -187,13 +199,16 @@ func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, reque
 			&types.HttpResponseErr{ErrMsg: "users [" + strings.Join(notSigned, ",") + "] in the must sign list have not signed the transaction"})
 		return
 	}
+	utils.Stats.TxCommitTime("detect-missing-sig", time.Since(start))
 
+	start = time.Now()
 	for _, userID := range txEnv.Payload.MustSignUserIds {
 		if err, code := VerifyRequestSignature(d.sigVerifier, userID, txEnv.Signatures[userID], txEnv.Payload); err != nil {
 			utils.SendHTTPResponse(response, code, &types.HttpResponseErr{ErrMsg: err.Error()})
 			return
 		}
 	}
+	utils.Stats.TxCommitTime("verify-sig", time.Since(start))
 
 	d.txHandler.handleTransaction(response, request, txEnv, timeout)
 }

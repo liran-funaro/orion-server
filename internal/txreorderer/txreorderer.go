@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/hyperledger-labs/orion-server/internal/queue"
+	"github.com/hyperledger-labs/orion-server/internal/utils"
 	"github.com/hyperledger-labs/orion-server/pkg/logger"
 	"github.com/hyperledger-labs/orion-server/pkg/types"
 )
@@ -75,7 +76,9 @@ func (r *TxReorderer) Start() {
 			r.enqueueAndResetPendingDataTxBatch()
 
 		default:
+			startDequeue := time.Now()
 			tx := r.txQueue.DequeueWithWaitLimit(r.batchTimeout)
+			utils.Stats.UpdateTxDequeueTime(time.Since(startDequeue))
 			if tx == nil {
 				continue
 			}
@@ -144,11 +147,14 @@ func (r *TxReorderer) enqueueAndResetPendingDataTxBatch() {
 	}
 
 	r.logger.Debugf("enqueueing [%d] data transactions", len(r.pendingDataTxs.Envelopes))
+	startEnqueue := time.Now()
 	r.txBatchQueue.Enqueue(
 		&types.Block_DataTxEnvelopes{
 			DataTxEnvelopes: r.pendingDataTxs,
 		},
 	)
+	utils.Stats.UpdateBatchEnqueueTime(time.Since(startEnqueue))
+	utils.Stats.UpdateBatchQueueSize(r.txBatchQueue.Size())
 
 	r.pendingDataTxs = &types.DataTxEnvelopes{}
 }

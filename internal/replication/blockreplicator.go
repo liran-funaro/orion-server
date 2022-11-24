@@ -1183,7 +1183,10 @@ func (br *BlockReplicator) commitBlock(block *types.Block, updateConfig bool) er
 		blockNumber, block.GetConsensusMetadata())
 
 	// we can only get a valid config transaction
+	utils.Stats.UpdateOneBlockQueueSize(br.oneQueueBarrier.Size())
+	enqueueStart := time.Now()
 	reConfig, err := br.oneQueueBarrier.EnqueueWait(block)
+	utils.Stats.UpdateBlockEnqueueTime(time.Since(enqueueStart))
 	if err != nil {
 		return err
 	}

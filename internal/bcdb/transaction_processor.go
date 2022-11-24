@@ -268,43 +268,21 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 		return nil, err
 	}
 
-	start := time.Now()
-	t.Lock()
-	utils.Stats.TxCommitTime("lock-wait", time.Since(start))
-
-	duplicate, err := t.isTxIDDuplicate(txID)
-	if err != nil {
-		t.Unlock()
-		return nil, err
-	}
-	if duplicate {
-		t.Unlock()
-		return nil, &internalerror.DuplicateTxIDError{TxID: txID}
-	}
-
-	if t.txQueue.IsFull() {
-		t.Unlock()
-		return nil, fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
-	}
-
 	jsonBytes, err := json.MarshalIndent(tx, "", "\t")
 	if err != nil {
-		t.Unlock()
 		return nil, fmt.Errorf("failed to marshal transaction: %v", err)
 	}
 	t.logger.Debugf("enqueuing transaction %s\n", string(jsonBytes))
 
-	t.txQueue.Enqueue(tx)
-	utils.Stats.QueueSize("tx", t.txQueue.Size())
-	t.logger.Debug("transaction is enqueued for re-ordering")
-
+	// Do as much work as possible outside the lock
 	promise := queue.NewCompletionPromise(timeout)
-	// TODO: add limit on the number of pending sync tx
-	t.pendingTxs.Add(txID, promise)
-	t.Unlock()
+	if err := t.enqueue(tx, txID, promise); err != nil {
+		return nil, err
+	}
+	t.logger.Debug("transaction is enqueued for re-ordering")
+	utils.Stats.QueueSize("tx", t.txQueue.Size())
 
 	receipt, err := promise.Wait()
-
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +290,36 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 	return &types.TxReceiptResponse{
 		Receipt: receipt,
 	}, nil
+}
+
+func (t *transactionProcessor) enqueue(tx interface{}, txID string, promise *queue.CompletionPromise) error {
+	//if t.txQueue.Size() > int(0.75*float32(t.txQueue.Capacity())) {
+	//	return fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
+	//}
+
+	// TODO: add limit on the number of pending sync tx
+	if existed := t.pendingTxs.Add(txID, promise); existed {
+		return &internalerror.DuplicateTxIDError{TxID: txID}
+	}
+
+	//duplicate, err := t.isTxIDDuplicate(txID)
+	duplicate, err := t.blockStore.DoesTxIDExist(txID)
+	if err != nil {
+		t.pendingTxs.DeleteWithNoAction(txID)
+		return err
+	}
+	if duplicate {
+		t.pendingTxs.DeleteWithNoAction(txID)
+		return &internalerror.DuplicateTxIDError{TxID: txID}
+	}
+
+	//start := time.Now()
+	//t.Lock()
+	//utils.Stats.TxCommitTime("lock-wait", time.Since(start))
+	//defer t.Unlock()
+
+	t.txQueue.Enqueue(tx)
+	return nil
 }
 
 func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) error {
@@ -348,16 +356,13 @@ func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) err
 }
 
 func (t *transactionProcessor) isTxIDDuplicate(txID string) (bool, error) {
-	start := time.Now()
-	duplicate := t.pendingTxs.Has(txID)
-	utils.Stats.TxCommitTime("is-pending-tx-id-exists", time.Since(start))
-	if duplicate {
-		return true, nil
-	}
+	//if duplicate := t.pendingTxs.Has(txID); duplicate {
+	//	return true, nil
+	//}
 
-	start = time.Now()
+	//start := time.Now()
 	isTxIDAlreadyCommitted, err := t.blockStore.DoesTxIDExist(txID)
-	utils.Stats.TxCommitTime("is-committed-tx-id-exists", time.Since(start))
+	//utils.Stats.TxCommitTime("is-committed-tx-id-exists", time.Since(start))
 	if err != nil {
 		return false, err
 	}
@@ -384,9 +389,6 @@ func (t *transactionProcessor) IsLeader() *internalerror.NotLeaderError {
 // ClusterStatus returns the leader NodeID, and the active nodes NodeIDs.
 // Note: leader is always in active.
 func (t *transactionProcessor) ClusterStatus() (leader string, active []string) {
-	t.Lock()
-	defer t.Unlock()
-
 	leaderID, activePeers := t.blockReplicator.GetClusterStatus()
 	for _, peer := range activePeers {
 		active = append(active, peer.NodeId)

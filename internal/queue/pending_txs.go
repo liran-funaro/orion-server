@@ -11,24 +11,44 @@ import (
 )
 
 type PendingTxs struct {
-	sync.RWMutex
-	txs map[string]*CompletionPromise
+	//sync.RWMutex
+	txs sync.Map
+	//txs map[string]*CompletionPromise
 
 	logger *logger.SugarLogger
 }
 
 func NewPendingTxs(logger *logger.SugarLogger) *PendingTxs {
 	return &PendingTxs{
-		txs:    make(map[string]*CompletionPromise),
+		//txs:    make(map[string]*CompletionPromise),
 		logger: logger,
 	}
 }
 
-func (p *PendingTxs) Add(txID string, promise *CompletionPromise) {
-	p.Lock()
-	defer p.Unlock()
+func (p *PendingTxs) Add(txID string, promise *CompletionPromise) bool {
+	//p.Lock()
+	//defer p.Unlock()
 
-	p.txs[txID] = promise
+	_, loaded := p.txs.LoadOrStore(txID, promise)
+	p.txs.Store(txID, promise)
+	//p.txs[txID] = promise
+	return loaded
+}
+
+func (p *PendingTxs) DeleteWithNoAction(txID string) {
+	//p.Lock()
+	//defer p.Unlock()
+
+	p.txs.Delete(txID)
+	//p.txs[txID] = promise
+}
+
+func (p *PendingTxs) loadAndDelete(txID string) (*CompletionPromise, bool) {
+	promise, loaded := p.txs.LoadAndDelete(txID)
+	if !loaded {
+		return nil, loaded
+	}
+	return promise.(*CompletionPromise), true
 }
 
 // DoneWithReceipt is called after the commit of a block.
@@ -36,18 +56,20 @@ func (p *PendingTxs) Add(txID string, promise *CompletionPromise) {
 func (p *PendingTxs) DoneWithReceipt(txIDs []string, blockHeader *types.BlockHeader) {
 	p.logger.Debugf("Done with receipt, block number: %d; txIDs: %v", blockHeader.GetBaseHeader().GetNumber(), txIDs)
 
-	p.Lock()
-	defer p.Unlock()
+	//p.Lock()
+	//defer p.Unlock()
 
 	for txIndex, txID := range txIDs {
-		p.txs[txID].done(
+		promise, loaded := p.loadAndDelete(txID)
+		if !loaded {
+			continue
+		}
+		promise.done(
 			&types.TxReceipt{
 				Header:  blockHeader,
 				TxIndex: uint64(txIndex),
 			},
 		)
-
-		delete(p.txs, txID)
 	}
 }
 
@@ -57,27 +79,34 @@ func (p *PendingTxs) DoneWithReceipt(txIDs []string, blockHeader *types.BlockHea
 func (p *PendingTxs) ReleaseWithError(txIDs []string, err error) {
 	p.logger.Debugf("Release with error: %s; txIDs: %v", err, txIDs)
 
-	p.Lock()
-	defer p.Unlock()
+	//p.Lock()
+	//defer p.Unlock()
 
 	for _, txID := range txIDs {
-		p.txs[txID].error(err)
-
-		delete(p.txs, txID)
+		promise, loaded := p.loadAndDelete(txID)
+		if !loaded {
+			continue
+		}
+		promise.error(err)
 	}
 }
 
 func (p *PendingTxs) Has(txID string) bool {
-	p.RLock()
-	defer p.RUnlock()
+	//p.RLock()
+	//defer p.RUnlock()
 
-	_, ok := p.txs[txID]
+	_, ok := p.txs.Load(txID)
 	return ok
 }
 
 func (p *PendingTxs) Empty() bool {
-	p.RLock()
-	defer p.RUnlock()
+	//p.RLock()
+	//defer p.RUnlock()
 
-	return len(p.txs) == 0
+	empty := true
+	p.txs.Range(func(key, value interface{}) bool {
+		empty = false
+		return false
+	})
+	return empty
 }

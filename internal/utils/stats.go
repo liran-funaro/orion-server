@@ -389,15 +389,19 @@ func (s *BlockProcessorStats) UpdateBlockEnqueueTime(t time.Duration) {
 }
 
 func (s *BlockProcessorStats) UpdateTxQueueSize(size int) {
-	s.queueSize.WithLabelValues("tx").Set(float64(size))
+	s.QueueSize("tx", size)
 }
 
 func (s *BlockProcessorStats) UpdateBatchQueueSize(size int) {
-	s.queueSize.WithLabelValues("batch").Set(float64(size))
+	s.QueueSize("batch", size)
 }
 
 func (s *BlockProcessorStats) UpdateOneBlockQueueSize(size int) {
-	s.queueSize.WithLabelValues("one").Set(float64(size))
+	s.QueueSize("one", size)
+}
+
+func (s *BlockProcessorStats) QueueSize(label string, size int) {
+	s.queueSize.WithLabelValues(label).Set(float64(size))
 }
 
 func (s *BlockProcessorStats) TxCommitTime(part string, t time.Duration) {

@@ -316,7 +316,8 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 	start = time.Now()
 	promise := queue.NewCompletionPromise(timeout)
 	// TODO: add limit on the number of pending sync tx
-	t.pendingTxs.Add(txID, promise)
+	sz := t.pendingTxs.Add(txID, promise)
+	utils.Stats.QueueSize("pending", sz)
 	utils.Stats.TxCommitTime("append-promise", time.Since(start))
 	t.Unlock()
 
@@ -367,11 +368,16 @@ func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) err
 }
 
 func (t *transactionProcessor) isTxIDDuplicate(txID string) (bool, error) {
-	if t.pendingTxs.Has(txID) {
+	start := time.Now()
+	duplicate := t.pendingTxs.Has(txID)
+	utils.Stats.TxCommitTime("is-pending-tx-id-exists", time.Since(start))
+	if duplicate {
 		return true, nil
 	}
 
+	start = time.Now()
 	isTxIDAlreadyCommitted, err := t.blockStore.DoesTxIDExist(txID)
+	utils.Stats.TxCommitTime("is-committed-tx-id-exists", time.Since(start))
 	if err != nil {
 		return false, err
 	}

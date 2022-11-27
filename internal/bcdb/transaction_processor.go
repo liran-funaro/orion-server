@@ -1,11 +1,11 @@
 // Copyright IBM Corp. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
+
 package bcdb
 
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,7 +46,6 @@ type transactionProcessor struct {
 	blockStore           *blockstore.Store
 	pendingTxs           *queue.PendingTxs
 	logger               *logger.SugarLogger
-	sync.Mutex
 }
 
 type txProcessorConfig struct {
@@ -246,16 +245,17 @@ func newTransactionProcessor(conf *txProcessorConfig) (*transactionProcessor, er
 // a non-zero timeout would be treated as a sync submission. When a timeout
 // occurs with the sync submission, a timeout error will be returned
 func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Duration) (*types.TxReceiptResponse, error) {
+	defer utils.Stats.TxCommitTime("tx-processor", time.Now())
 	var txID string
-	switch tx.(type) {
+	switch typedTx := tx.(type) {
 	case *types.DataTxEnvelope:
-		txID = tx.(*types.DataTxEnvelope).Payload.TxId
+		txID = typedTx.Payload.TxId
 	case *types.UserAdministrationTxEnvelope:
-		txID = tx.(*types.UserAdministrationTxEnvelope).Payload.TxId
+		txID = typedTx.Payload.TxId
 	case *types.DBAdministrationTxEnvelope:
-		txID = tx.(*types.DBAdministrationTxEnvelope).Payload.TxId
+		txID = typedTx.Payload.TxId
 	case *types.ConfigTxEnvelope:
-		txID = tx.(*types.ConfigTxEnvelope).Payload.TxId
+		txID = typedTx.Payload.TxId
 	default:
 		return nil, errors.Errorf("unexpected transaction type")
 	}
@@ -268,25 +268,13 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 		return nil, err
 	}
 
-	jsonBytes, err := json.MarshalIndent(tx, "", "\t")
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal transaction: %v", err)
-	}
-	t.logger.Debugf("enqueuing transaction %s\n", string(jsonBytes))
-
-	//if t.txQueue.Size() > int(0.75*float32(t.txQueue.Capacity())) {
-	//	return fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
-	//}
-
-	promise := queue.NewCompletionPromise(timeout)
-
-	// TODO: add limit on the number of pending sync tx
-
 	// We attempt to insert the txID atomically.
 	// If we succeed, then future TX fill fail at this point.
 	// However, if the TX already exists in the block store, then we will fail the subsequent check.
 	// Since a TX will be removed from the pending queue only after it is inserted to the block store,
 	// Then it is guaranteed that we won't use the same txID twice.
+	// TODO: add limit on the number of pending sync tx
+	promise := queue.NewCompletionPromise(timeout)
 	if existed := t.pendingTxs.Add(txID, promise); existed {
 		return nil, &internalerror.DuplicateTxIDError{TxID: txID}
 	}
@@ -300,14 +288,17 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 		return nil, err
 	}
 
-	//start := time.Now()
-	//t.Lock()
-	//utils.Stats.TxCommitTime("lock-wait", time.Since(start))
-	//defer t.Unlock()
+	jsonBytes, err := json.MarshalIndent(tx, "", "\t")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal transaction: %v", err)
+	}
+	t.logger.Debugf("enqueuing transaction %s\n", string(jsonBytes))
 
+	start := time.Now()
 	t.txQueue.Enqueue(tx)
-	t.logger.Debug("transaction is enqueued for re-ordering")
+	utils.Stats.TxCommitTime("tx-enqueue", start)
 	utils.Stats.QueueSize("tx", t.txQueue.Size())
+	t.logger.Debug("transaction is enqueued for re-ordering")
 
 	receipt, err := promise.Wait()
 	if err != nil {
@@ -353,12 +344,9 @@ func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) err
 }
 
 func (t *transactionProcessor) Close() error {
-	t.Lock()
-	defer t.Unlock()
-
 	t.txReorderer.Stop()
 	t.blockCreator.Stop()
-	t.blockReplicator.Close()
+	_ = t.blockReplicator.Close()
 	t.peerTransport.Close()
 	t.blockProcessor.Stop()
 

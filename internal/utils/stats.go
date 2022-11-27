@@ -314,8 +314,8 @@ func (s *BlockProcessorStats) QueueSize(label string, size int) {
 	s.queueSize.WithLabelValues(label).Set(float64(size))
 }
 
-func (s *BlockProcessorStats) TxCommitTime(part string, t time.Duration) {
-	s.txCommitHandlingTime.WithLabelValues(part).Observe(t.Seconds())
+func (s *BlockProcessorStats) TxCommitTime(part string, startTime time.Time) {
+	s.txCommitHandlingTime.WithLabelValues(part).Observe(time.Since(startTime).Seconds())
 }
 
 var Stats = newBlockProcessorStats()

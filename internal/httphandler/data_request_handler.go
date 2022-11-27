@@ -137,8 +137,7 @@ func (d *dataRequestHandler) dataRangeQuery(response http.ResponseWriter, reques
 }
 
 func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, request *http.Request) {
-	totalStart := time.Now()
-	defer utils.Stats.TxCommitTime("all", time.Since(totalStart))
+	defer utils.Stats.TxCommitTime("all", time.Now())
 
 	timeout, err := validateAndParseTxPostHeader(&request.Header)
 	if err != nil {

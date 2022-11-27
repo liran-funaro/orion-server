@@ -274,11 +274,38 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 	}
 	t.logger.Debugf("enqueuing transaction %s\n", string(jsonBytes))
 
-	// Do as much work as possible outside the lock
+	//if t.txQueue.Size() > int(0.75*float32(t.txQueue.Capacity())) {
+	//	return fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
+	//}
+
 	promise := queue.NewCompletionPromise(timeout)
-	if err := t.enqueue(tx, txID, promise); err != nil {
+
+	// TODO: add limit on the number of pending sync tx
+
+	// We attempt to insert the txID atomically.
+	// If we succeed, then future TX fill fail at this point.
+	// However, if the TX already exists in the block store, then we will fail the subsequent check.
+	// Since a TX will be removed from the pending queue only after it is inserted to the block store,
+	// Then it is guaranteed that we won't use the same txID twice.
+	if existed := t.pendingTxs.Add(txID, promise); existed {
+		return nil, &internalerror.DuplicateTxIDError{TxID: txID}
+	}
+
+	duplicate, err := t.blockStore.DoesTxIDExist(txID)
+	if err != nil || duplicate {
+		t.pendingTxs.DeleteWithNoAction(txID)
+		if err == nil {
+			err = &internalerror.DuplicateTxIDError{TxID: txID}
+		}
 		return nil, err
 	}
+
+	//start := time.Now()
+	//t.Lock()
+	//utils.Stats.TxCommitTime("lock-wait", time.Since(start))
+	//defer t.Unlock()
+
+	t.txQueue.Enqueue(tx)
 	t.logger.Debug("transaction is enqueued for re-ordering")
 	utils.Stats.QueueSize("tx", t.txQueue.Size())
 
@@ -290,36 +317,6 @@ func (t *transactionProcessor) SubmitTransaction(tx interface{}, timeout time.Du
 	return &types.TxReceiptResponse{
 		Receipt: receipt,
 	}, nil
-}
-
-func (t *transactionProcessor) enqueue(tx interface{}, txID string, promise *queue.CompletionPromise) error {
-	//if t.txQueue.Size() > int(0.75*float32(t.txQueue.Capacity())) {
-	//	return fmt.Errorf("transaction queue is full. It means the server load is high. Try after sometime")
-	//}
-
-	// TODO: add limit on the number of pending sync tx
-	if existed := t.pendingTxs.Add(txID, promise); existed {
-		return &internalerror.DuplicateTxIDError{TxID: txID}
-	}
-
-	//duplicate, err := t.isTxIDDuplicate(txID)
-	duplicate, err := t.blockStore.DoesTxIDExist(txID)
-	if err != nil {
-		t.pendingTxs.DeleteWithNoAction(txID)
-		return err
-	}
-	if duplicate {
-		t.pendingTxs.DeleteWithNoAction(txID)
-		return &internalerror.DuplicateTxIDError{TxID: txID}
-	}
-
-	//start := time.Now()
-	//t.Lock()
-	//utils.Stats.TxCommitTime("lock-wait", time.Since(start))
-	//defer t.Unlock()
-
-	t.txQueue.Enqueue(tx)
-	return nil
 }
 
 func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) error {
@@ -353,20 +350,6 @@ func (t *transactionProcessor) PostBlockCommitProcessing(block *types.Block) err
 	t.pendingTxs.DoneWithReceipt(txIDs, block.Header)
 
 	return nil
-}
-
-func (t *transactionProcessor) isTxIDDuplicate(txID string) (bool, error) {
-	//if duplicate := t.pendingTxs.Has(txID); duplicate {
-	//	return true, nil
-	//}
-
-	//start := time.Now()
-	isTxIDAlreadyCommitted, err := t.blockStore.DoesTxIDExist(txID)
-	//utils.Stats.TxCommitTime("is-committed-tx-id-exists", time.Since(start))
-	if err != nil {
-		return false, err
-	}
-	return isTxIDAlreadyCommitted, nil
 }
 
 func (t *transactionProcessor) Close() error {

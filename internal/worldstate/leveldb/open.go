@@ -30,17 +30,15 @@ var (
 // LevelDB holds information about all created database
 type LevelDB struct {
 	dbRootDir   string
-	dbs         map[string]*db
+	dbs         sync.Map
 	logger      *logger.SugarLogger
-	dbsList     sync.RWMutex
 	dbNameRegex *regexp.Regexp
 }
 
-// db - a wrapper on an actual store
-type db struct {
+// Db - a wrapper on an actual store
+type Db struct {
 	name      string
 	file      *leveldb.DB
-	mu        sync.RWMutex
 	readOpts  *opt.ReadOptions
 	writeOpts *opt.WriteOptions
 }
@@ -109,7 +107,6 @@ func openNewLevelDBInstance(c *Config) (*LevelDB, error) {
 
 	l := &LevelDB{
 		dbRootDir:   c.DBRootDir,
-		dbs:         make(map[string]*db),
 		logger:      c.Logger,
 		dbNameRegex: regexp.MustCompile(allowedCharsInDBName),
 	}
@@ -130,7 +127,6 @@ func openNewLevelDBInstance(c *Config) (*LevelDB, error) {
 func openExistingLevelDBInstance(c *Config) (*LevelDB, error) {
 	l := &LevelDB{
 		dbRootDir:   c.DBRootDir,
-		dbs:         make(map[string]*db),
 		logger:      c.Logger,
 		dbNameRegex: regexp.MustCompile(allowedCharsInDBName),
 	}
@@ -149,12 +145,12 @@ func openExistingLevelDBInstance(c *Config) (*LevelDB, error) {
 			return nil, errors.WithMessagef(err, "failed to open leveldb file for database %s", dbName)
 		}
 
-		l.dbs[dbName] = &db{
+		l.dbs.Store(dbName, &Db{
 			name:      dbName,
 			file:      file,
 			readOpts:  &opt.ReadOptions{},
 			writeOpts: &opt.WriteOptions{Sync: true},
-		}
+		})
 	}
 
 	return l, nil
@@ -162,19 +158,13 @@ func openExistingLevelDBInstance(c *Config) (*LevelDB, error) {
 
 // Close closes the database instance by closing all leveldb databases
 func (l *LevelDB) Close() error {
-	l.dbsList.Lock()
-	defer l.dbsList.Unlock()
-
-	for name, db := range l.dbs {
-		db.mu.Lock()
-		defer db.mu.Unlock()
-
-		if err := db.file.Close(); err != nil {
-			return errors.Errorf("error while closing database %s, %v", name, err)
+	l.Range(func(name, value interface{}) bool {
+		if err := value.(*Db).file.Close(); err != nil {
+			l.logger.Errorf("error while closing database %s, %v", name, err)
 		}
-
-		delete(l.dbs, db.name)
-	}
+		return true
+	})
+	l.dbs = sync.Map{}
 
 	return nil
 }
@@ -182,4 +172,29 @@ func (l *LevelDB) Close() error {
 // ValidDBName returns true if the given dbName is valid
 func (l *LevelDB) ValidDBName(dbName string) bool {
 	return l.dbNameRegex.MatchString(dbName)
+}
+
+func (l *LevelDB) GetDB(name string) (*Db, bool) {
+	value, ok := l.dbs.Load(name)
+	if !ok {
+		return nil, ok
+	}
+	return value.(*Db), ok
+}
+
+func (l *LevelDB) GetAndDelDB(name string) (*Db, bool) {
+	value, loaded := l.dbs.LoadAndDelete(name)
+	if !loaded {
+		return nil, loaded
+	}
+	return value.(*Db), loaded
+}
+
+func (l *LevelDB) SetDB(name string, value *Db) bool {
+	_, loaded := l.dbs.LoadOrStore(name, value)
+	return !loaded
+}
+
+func (l *LevelDB) Range(f func(name, value interface{}) bool) {
+	l.dbs.Range(f)
 }

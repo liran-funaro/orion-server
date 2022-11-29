@@ -18,23 +18,17 @@ type Snapshots struct {
 }
 
 func (l *LevelDB) GetDBsSnapshot(dbNames []string) (worldstate.DBsSnapshot, error) {
-	l.dbsList.RLock()
-	defer l.dbsList.RUnlock()
-
 	snap := &Snapshots{
 		dbSnap: make(map[string]*leveldb.Snapshot),
 	}
 
 	for _, dbName := range dbNames {
-		db, ok := l.dbs[dbName]
+		db, ok := l.GetDB(dbName)
 		if !ok {
 			return nil, &DBNotFoundErr{
 				dbName: dbName,
 			}
 		}
-
-		db.mu.RLock()
-		defer db.mu.RUnlock()
 
 		s, err := db.file.GetSnapshot()
 		if err != nil {

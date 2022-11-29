@@ -25,30 +25,25 @@ var (
 
 // Exist returns true if the given database exist. Otherwise, it returns false.
 func (l *LevelDB) Exist(dbName string) bool {
-	l.dbsList.RLock()
-	defer l.dbsList.RUnlock()
-
-	_, ok := l.dbs[dbName]
+	_, ok := l.GetDB(dbName)
 	return ok
 }
 
 // ListDBs list all user databases
 func (l *LevelDB) ListDBs() []string {
-	l.dbsList.RLock()
-	defer l.dbsList.RUnlock()
-
 	dbsToExclude := make(map[string]struct{})
 	for _, name := range preCreateDBs {
 		dbsToExclude[name] = struct{}{}
 	}
 
 	var dbNames []string
-	for name := range l.dbs {
-		if _, ok := dbsToExclude[name]; ok {
-			continue
+	l.Range(func(key, value interface{}) bool {
+		name := key.(string)
+		if _, ok := dbsToExclude[name]; !ok {
+			dbNames = append(dbNames, name)
 		}
-		dbNames = append(dbNames, name)
-	}
+		return true
+	})
 
 	return dbNames
 }
@@ -56,16 +51,10 @@ func (l *LevelDB) ListDBs() []string {
 // Height returns the block height of the state database. In other words, it
 // returns the last committed block number
 func (l *LevelDB) Height() (uint64, error) {
-	l.dbsList.RLock()
-	defer l.dbsList.RUnlock()
-
-	db, ok := l.dbs[worldstate.MetadataDBName]
+	db, ok := l.GetDB(worldstate.MetadataDBName)
 	if !ok {
 		return 0, errors.Errorf("unable to retrieve the state database height due to missing metadataDB")
 	}
-
-	db.mu.RLock()
-	defer db.mu.RUnlock()
 
 	blockNumberEnc, err := db.file.Get(lastCommittedBlockNumberKey, &opt.ReadOptions{})
 	if err != nil && err != leveldb.ErrNotFound {
@@ -86,18 +75,12 @@ func (l *LevelDB) Height() (uint64, error) {
 
 // Get returns the value of the key present in the database.
 func (l *LevelDB) Get(dbName string, key string) ([]byte, *types.Metadata, error) {
-	l.dbsList.RLock()
-	defer l.dbsList.RUnlock()
-
-	db, ok := l.dbs[dbName]
+	db, ok := l.GetDB(dbName)
 	if !ok {
 		return nil, nil, &DBNotFoundErr{
 			dbName: dbName,
 		}
 	}
-
-	db.mu.RLock()
-	defer db.mu.RUnlock()
 
 	dbval, err := db.file.Get([]byte(key), db.readOpts)
 	if err == leveldb.ErrNotFound {
@@ -137,9 +120,10 @@ func (l *LevelDB) GetACL(dbName, key string) (*types.AccessControl, error) {
 
 // Has returns true if the key exist in the database
 func (l *LevelDB) Has(dbName, key string) (bool, error) {
-	l.dbsList.RLock()
-	db := l.dbs[dbName]
-	l.dbsList.RUnlock()
+	db, ok := l.GetDB(dbName)
+	if !ok {
+		return false, nil
+	}
 
 	return db.file.Has([]byte(key), nil)
 }
@@ -169,11 +153,9 @@ func (l *LevelDB) GetIndexDefinition(dbName string) ([]byte, *types.Metadata, er
 // the caller wants from the first key in the database (lexicographic order). An empty
 // endKey (i.e., "") denotes that the caller wants till the last key in the database (lexicographic order).
 func (l *LevelDB) GetIterator(dbName string, startKey, endKey string) (worldstate.Iterator, error) {
-	l.dbsList.RLock()
-	db := l.dbs[dbName]
-	l.dbsList.RUnlock()
+	db, ok := l.GetDB(dbName)
 
-	if db == nil {
+	if !ok || db == nil {
 		l.logger.Errorf("database %s does not exist", dbName)
 		return nil, errors.Errorf("database %s does not exist", dbName)
 	}
@@ -197,11 +179,9 @@ func (l *LevelDB) GetIterator(dbName string, startKey, endKey string) (worldstat
 // Commit commits the updates to the database
 func (l *LevelDB) Commit(dbsUpdates map[string]*worldstate.DBUpdates, blockNumber uint64) error {
 	for dbName, updates := range dbsUpdates {
-		l.dbsList.RLock()
-		db := l.dbs[dbName]
-		l.dbsList.RUnlock()
+		db, ok := l.GetDB(dbName)
 
-		if db == nil {
+		if !ok || db == nil {
 			l.logger.Errorf("database %s does not exist", dbName)
 			return errors.Errorf("database %s does not exist", dbName)
 		}
@@ -210,19 +190,14 @@ func (l *LevelDB) Commit(dbsUpdates map[string]*worldstate.DBUpdates, blockNumbe
 		if err := l.commitToDB(dbName, db, updates); err != nil {
 			return err
 		}
-		l.logger.Debugf("changes committed to the database %s, took %d ms, available dbs are [%s]", dbName, time.Since(start).Milliseconds(), l.dbs)
+		l.logger.Debugf("changes committed to the database %s, took %d ms, available dbs are [%s]", dbName, time.Since(start).Milliseconds(), "")
 	}
 
-	l.dbsList.RLock()
-	db, exists := l.dbs[worldstate.MetadataDBName]
-	l.dbsList.RUnlock()
+	db, exists := l.GetDB(worldstate.MetadataDBName)
 	if !exists {
-		l.logger.Errorf("metadata database does not exist, available dbs are [%+v]", l.dbs)
+		l.logger.Errorf("metadata database does not exist, available dbs are [%+v]", "")
 		return errors.Errorf("metadata database does not exist")
 	}
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
 
 	b := make([]byte, binary.MaxVarintLen64)
 	binary.PutUvarint(b, blockNumber)
@@ -233,7 +208,7 @@ func (l *LevelDB) Commit(dbsUpdates map[string]*worldstate.DBUpdates, blockNumbe
 	return nil
 }
 
-func (l *LevelDB) commitToDB(dbName string, db *db, updates *worldstate.DBUpdates) error {
+func (l *LevelDB) commitToDB(dbName string, db *Db, updates *worldstate.DBUpdates) error {
 	batch := &leveldb.Batch{}
 
 	for _, kv := range updates.Writes {
@@ -253,9 +228,6 @@ func (l *LevelDB) commitToDB(dbName string, db *db, updates *worldstate.DBUpdate
 	for _, key := range updates.Deletes {
 		batch.Delete([]byte(key))
 	}
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
 
 	if err := db.file.Write(batch, db.writeOpts); err != nil {
 		return errors.Wrapf(err, "error while writing an update batch to database [%s]", db.name)
@@ -294,24 +266,22 @@ func (l *LevelDB) commitToDB(dbName string, db *db, updates *worldstate.DBUpdate
 
 // create creates a database. It does not return an error when the database already exist.
 func (l *LevelDB) create(dbName string) error {
-	l.dbsList.Lock()
-	defer l.dbsList.Unlock()
-
-	if _, ok := l.dbs[dbName]; ok {
-		l.logger.Debugf("Skipping %s cause database already exists", dbName)
-		return nil
-	}
-
 	file, err := leveldb.OpenFile(filepath.Join(l.dbRootDir, dbName), &opt.Options{})
 	if err != nil {
 		return errors.WithMessagef(err, "failed to open leveldb file for database %s", dbName)
 	}
 
-	l.dbs[dbName] = &db{
+	success := l.SetDB(dbName, &Db{
 		name:      dbName,
 		file:      file,
 		readOpts:  &opt.ReadOptions{},
 		writeOpts: &opt.WriteOptions{Sync: true},
+	})
+
+	if !success {
+		_ = file.Close()
+		l.logger.Debugf("Skipping %s cause database already exists", dbName)
+		return nil
 	}
 
 	return nil
@@ -321,22 +291,14 @@ func (l *LevelDB) create(dbName string) error {
 // delete would be called only by the Commit() when processing delete entries associated with
 // the _db
 func (l *LevelDB) delete(dbName string) error {
-	l.dbsList.Lock()
-	defer l.dbsList.Unlock()
-
-	db, ok := l.dbs[dbName]
-	if !ok {
+	db, existed := l.GetAndDelDB(dbName)
+	if !existed {
 		return nil
 	}
-
-	db.mu.Lock()
-	defer db.mu.Unlock()
 
 	if err := db.file.Close(); err != nil {
 		return errors.Wrapf(err, "error while closing the database [%s] before delete", dbName)
 	}
-
-	delete(l.dbs, dbName)
 
 	if err := os.RemoveAll(filepath.Join(l.dbRootDir, dbName)); err != nil {
 		return errors.Wrapf(err, "error while deleting database [%s]", dbName)

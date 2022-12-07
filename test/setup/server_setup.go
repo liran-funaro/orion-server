@@ -1338,8 +1338,8 @@ func (s *Server) CreateConfigFile(conf *config.LocalConfiguration) error {
 		},
 		BlockCreation: config.BlockCreationConf{
 			MaxBlockSize:                1024 * 1024,
-			MaxTransactionCountPerBlock: 10,
-			BlockTimeout:                50 * time.Millisecond,
+			MaxTransactionCountPerBlock: 1,
+			BlockTimeout:                1 * time.Nanosecond,
 		},
 		Replication: config.ReplicationConf{
 			WALDir:  filepath.Join(s.configDir, "etcdraft", "wal"),

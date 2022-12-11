@@ -30,7 +30,7 @@ var sizeBase10Buckets = []float64{
 }
 
 var sizeBase2Buckets = []float64{
-	0, 1 << 6, 1 << 8,
+	0, 1 << 3, 1 << 6, 1 << 8, 1 << 9,
 	1 << 10, 1 << 12, 1 << 14, 1 << 16, 1 << 18,
 	1 << 20, 1 << 22, 1 << 24, 1 << 26, 1 << 28,
 	1 << 30, math.Inf(1),
@@ -58,6 +58,7 @@ type BlockProcessorStats struct {
 	blockInvokeListenersTime      prometheus.Histogram
 	raftEventTime                 prometheus.Histogram
 	txCommitHandlingTime          *prometheus.HistogramVec
+	txSize                        prometheus.Histogram
 }
 
 func newBlockProcessorStats() *BlockProcessorStats {
@@ -231,6 +232,14 @@ func newBlockProcessorStats() *BlockProcessorStats {
 				Buckets:   timeBuckets,
 			}, []string{"part"},
 		),
+		txSize: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Namespace: "tx",
+				Name:      "size_bytes",
+				Help:      "Total tx size in bytes",
+				Buckets:   sizeBase2Buckets,
+			},
+		),
 	}
 }
 
@@ -316,6 +325,10 @@ func (s *BlockProcessorStats) QueueSize(label string, size int) {
 
 func (s *BlockProcessorStats) TxCommitTime(part string, startTime time.Time) {
 	s.txCommitHandlingTime.WithLabelValues(part).Observe(time.Since(startTime).Seconds())
+}
+
+func (s *BlockProcessorStats) TxSize(size int) {
+	s.txSize.Observe(float64(size))
 }
 
 var Stats = newBlockProcessorStats()

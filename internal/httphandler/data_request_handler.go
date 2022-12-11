@@ -159,6 +159,7 @@ func (d *dataRequestHandler) dataTransaction(response http.ResponseWriter, reque
 		utils.SendHTTPResponse(response, http.StatusBadRequest, &types.HttpResponseErr{ErrMsg: err.Error()})
 		return
 	}
+	utils.Stats.TxSize(len(requestBody))
 
 	if txEnv.Payload == nil {
 		utils.SendHTTPResponse(response, http.StatusBadRequest,

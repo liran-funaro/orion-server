@@ -82,7 +82,14 @@ func (l *LevelDB) Get(dbName string, key string) ([]byte, *types.Metadata, error
 		}
 	}
 
-	dbval, err := db.file.Get([]byte(key), db.readOpts)
+	var dbval []byte
+	var err error
+	if db.snap != nil {
+		dbval, err = db.snap.Get([]byte(key), db.readOpts)
+	} else {
+		dbval, err = db.file.Get([]byte(key), db.readOpts)
+	}
+
 	if err == leveldb.ErrNotFound {
 		return nil, nil, nil
 	}
@@ -189,6 +196,15 @@ func (l *LevelDB) Commit(dbsUpdates map[string]*worldstate.DBUpdates, blockNumbe
 		start := time.Now()
 		if err := l.commitToDB(dbName, db, updates); err != nil {
 			return err
+		}
+		snap, err := db.file.GetSnapshot()
+		if err != nil {
+			return err
+		}
+		prev := db.snap
+		db.snap = snap
+		if prev != nil {
+			prev.Release()
 		}
 		l.logger.Debugf("changes committed to the database %s, took %d ms, available dbs are [%s]", dbName, time.Since(start).Milliseconds(), "")
 	}

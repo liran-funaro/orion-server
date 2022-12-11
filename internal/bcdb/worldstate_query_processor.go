@@ -6,6 +6,7 @@ package bcdb
 import (
 	"context"
 	"fmt"
+
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/orion-server/config"
 	"github.com/hyperledger-labs/orion-server/internal/blockstore"

@@ -39,6 +39,7 @@ type LevelDB struct {
 type Db struct {
 	name      string
 	file      *leveldb.DB
+	snap      *leveldb.Snapshot
 	readOpts  *opt.ReadOptions
 	writeOpts *opt.WriteOptions
 }

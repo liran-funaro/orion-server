@@ -4,7 +4,6 @@
 package blockprocessor
 
 import (
-	"github.com/hyperledger-labs/orion-server/config"
 	"sync"
 	"time"
 

@@ -1,5 +1,5 @@
 TIMEOUT  = 20m
-GO      = go1.19.4
+GO      = go
 DOCKER  = docker
 DOCKER_IMAGE = orionbcdb/orion-server
 DOCKERFILE = images/Dockerfile

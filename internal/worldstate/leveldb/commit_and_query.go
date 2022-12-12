@@ -82,19 +82,32 @@ func (l *LevelDB) Get(dbName string, key string) ([]byte, *types.Metadata, error
 		}
 	}
 
+	peristed, err := l.cache.getState(dbName, key)
+	if err != nil {
+		return nil, nil, errors.WithMessagef(err, "failed to retrieve leveldb key [%s] from database %s through cache", key, dbName)
+	}
+	if peristed != nil {
+		return peristed.Value, peristed.Metadata, nil
+	}
+
 	var dbval []byte
-	var err error
 	if db.snap != nil {
 		dbval, err = db.snap.Get([]byte(key), db.readOpts)
 	} else {
 		dbval, err = db.file.Get([]byte(key), db.readOpts)
 	}
-
 	if err == leveldb.ErrNotFound {
+		if err = l.cache.putState(dbName, key, nil); err != nil {
+			return nil, nil, err
+		}
 		return nil, nil, nil
 	}
 	if err != nil {
 		return nil, nil, errors.WithMessagef(err, "failed to retrieve leveldb key [%s] from database %s", key, dbName)
+	}
+
+	if err = l.cache.putState(dbName, key, dbval); err != nil {
+		return nil, nil, err
 	}
 
 	persisted := &types.ValueWithMetadata{}
@@ -239,10 +252,12 @@ func (l *LevelDB) commitToDB(dbName string, db *Db, updates *worldstate.DBUpdate
 		}
 
 		batch.Put([]byte(kv.Key), dbval)
+		l.cache.putStateIfExist(dbName, kv.Key, dbval)
 	}
 
 	for _, key := range updates.Deletes {
 		batch.Delete([]byte(key))
+		l.cache.delState(dbName, key)
 	}
 
 	if err := db.file.Write(batch, db.writeOpts); err != nil {

@@ -103,6 +103,35 @@ func (v *Validator) ValidateBlock(block *types.Block) ([]*types.ValidationInfo, 
 		}
 
 		pendingOps := newPendingOperations()
+		pendingOps.reads = make(map[string]map[string]*readCache)
+		for txNum, txEnv := range dataTxEnvs {
+			if valInfoArray[txNum].Flag != types.Flag_VALID {
+				continue
+			}
+			for _, txOps := range txEnv.Payload.DbOperations {
+				dbName := txOps.DbName
+				dbReads, ok := pendingOps.reads[dbName]
+				if !ok {
+					dbReads = make(map[string]*readCache)
+					pendingOps.reads[txOps.DbName] = dbReads
+				}
+				for _, r := range txOps.DataReads {
+					key := r.Key
+					c, ok := dbReads[key]
+					if ok {
+						continue
+					}
+
+					c = &readCache{}
+					c.wg.Add(1)
+					dbReads[key] = c
+					go func(c *readCache, dbName, key string) {
+						c.ver, c.err = v.dataTxValidator.db.GetVersion(dbName, key)
+						c.wg.Done()
+					}(c, dbName, key)
+				}
+			}
+		}
 		for txNum, txEnv := range dataTxEnvs {
 			if valInfoArray[txNum].Flag != types.Flag_VALID {
 				continue
@@ -350,9 +379,16 @@ func (v *Validator) parallelSigValidation(dataTxEnvs []*types.DataTxEnvelope) ([
 	return valInfoPerTx, usersWithValidSigPerTX, nil
 }
 
+type readCache struct {
+	ver *types.Version
+	err error
+	wg  sync.WaitGroup
+}
+
 type pendingOperations struct {
 	pendingWrites  map[string]bool
 	pendingDeletes map[string]bool
+	reads          map[string]map[string]*readCache
 }
 
 func newPendingOperations() *pendingOperations {

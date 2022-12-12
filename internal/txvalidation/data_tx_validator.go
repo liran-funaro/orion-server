@@ -629,7 +629,20 @@ func (v *dataTxValidator) mvccValidation(dbName string, txOps *types.DBOperation
 			}, nil
 		}
 
-		committedVersion, err := v.db.GetVersion(dbName, r.Key)
+		var committedVersion *types.Version
+		var err error
+		if pendingOps.reads == nil {
+			committedVersion, err = v.db.GetVersion(dbName, r.Key)
+		} else {
+			c := pendingOps.reads[dbName][r.Key]
+			if c.err != nil {
+				return nil, c.err
+			}
+			if c.ver == nil {
+				c.wg.Wait()
+			}
+			committedVersion, err = c.ver, c.err
+		}
 		if err != nil {
 			return nil, err
 		}

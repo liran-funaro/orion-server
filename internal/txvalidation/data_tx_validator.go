@@ -620,6 +620,68 @@ func (v *dataTxValidator) validateACLForWriteOrDelete(userIDs []string, dbName, 
 	}, nil
 }
 
+func (v *dataTxValidator) parallelReadMvccValidation(
+	valInfoArray []*types.ValidationInfo, dataTxEnvs []*types.DataTxEnvelope,
+) {
+	reads := make(map[string]map[string]*readCache)
+
+	wg := sync.WaitGroup{}
+	for txNum, txEnv := range dataTxEnvs {
+		if valInfoArray[txNum].Flag != types.Flag_VALID {
+			continue
+		}
+		for _, txOps := range txEnv.Payload.DbOperations {
+			if valInfoArray[txNum].Flag != types.Flag_VALID {
+				continue
+			}
+
+			dbName := txOps.DbName
+			dbReads, ok := reads[dbName]
+			if !ok {
+				dbReads = make(map[string]*readCache)
+				reads[txOps.DbName] = dbReads
+			}
+
+			for _, r := range txOps.DataReads {
+				if valInfoArray[txNum].Flag != types.Flag_VALID {
+					continue
+				}
+
+				key := r.Key
+				c, ok := dbReads[key]
+				if ok {
+					if proto.Equal(r.Version, c.ver) {
+						continue
+					}
+
+					valInfoArray[txNum] = &types.ValidationInfo{
+						Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
+						ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
+					}
+					break
+				} else {
+					c = &readCache{}
+					dbReads[key] = c
+					wg.Add(1)
+					go func(c *readCache, dbName, key string) {
+						if valInfoArray[txNum].Flag == types.Flag_VALID {
+							c.ver, c.err = v.db.GetVersion(dbName, key)
+							if !proto.Equal(r.Version, c.ver) {
+								valInfoArray[txNum] = &types.ValidationInfo{
+									Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
+									ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
+								}
+							}
+						}
+						wg.Done()
+					}(c, dbName, key)
+				}
+			}
+		}
+	}
+	wg.Wait()
+}
+
 func (v *dataTxValidator) mvccValidation(dbName string, txOps *types.DBOperation, pendingOps *pendingOperations) (*types.ValidationInfo, error) {
 	for _, r := range txOps.DataReads {
 		if pendingOps.exist(dbName, r.Key) {
@@ -629,20 +691,7 @@ func (v *dataTxValidator) mvccValidation(dbName string, txOps *types.DBOperation
 			}, nil
 		}
 
-		var committedVersion *types.Version
-		var err error
-		if pendingOps.reads == nil {
-			committedVersion, err = v.db.GetVersion(dbName, r.Key)
-		} else {
-			c := pendingOps.reads[dbName][r.Key]
-			if c.err != nil {
-				return nil, c.err
-			}
-			if c.ver == nil {
-				c.wg.Wait()
-			}
-			committedVersion, err = c.ver, c.err
-		}
+		committedVersion, err := v.db.GetVersion(dbName, r.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -656,6 +705,10 @@ func (v *dataTxValidator) mvccValidation(dbName string, txOps *types.DBOperation
 		}, nil
 	}
 
+	return v.mvccValidationWriteDelete(dbName, txOps, pendingOps)
+}
+
+func (v *dataTxValidator) mvccValidationWriteDelete(dbName string, txOps *types.DBOperation, pendingOps *pendingOperations) (*types.ValidationInfo, error) {
 	// as state trie generation work at the boundary of block, we cannot allow more than one write per key. This is because, the state trie
 	// generation considers only the final updates and not intermediate updates within a block boundary. As a result, we would have intermediate
 	// entries in the provenance store but cannot generate proof of existence for the same using the state trie. As blind writes/deletes are quite

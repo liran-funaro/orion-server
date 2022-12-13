@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/orion-server/internal/identity"
@@ -622,51 +624,38 @@ func (v *dataTxValidator) validateACLForWriteOrDelete(userIDs []string, dbName, 
 
 func (v *dataTxValidator) parallelReadMvccValidation(
 	valInfoArray []*types.ValidationInfo, dataTxEnvs []*types.DataTxEnvelope,
-) {
+) error {
 	reads := make(map[string]map[string]*readCache)
+	var reportedError unsafe.Pointer
 
 	wg := sync.WaitGroup{}
 	for txNum, txEnv := range dataTxEnvs {
-		if valInfoArray[txNum].Flag != types.Flag_VALID {
-			continue
-		}
 		for _, txOps := range txEnv.Payload.DbOperations {
-			if valInfoArray[txNum].Flag != types.Flag_VALID {
-				continue
-			}
-
 			dbName := txOps.DbName
 			dbReads, ok := reads[dbName]
 			if !ok {
 				dbReads = make(map[string]*readCache)
-				reads[txOps.DbName] = dbReads
+				reads[dbName] = dbReads
 			}
 
 			for _, r := range txOps.DataReads {
+				errPtr := atomic.LoadPointer(&reportedError)
+				if errPtr != nil {
+					return *(*error)(errPtr)
+				}
 				if valInfoArray[txNum].Flag != types.Flag_VALID {
 					continue
 				}
 
 				key := r.Key
+				ver := r.Version
 				c, ok := dbReads[key]
 				if ok {
-					if proto.Equal(r.Version, c.ver) {
-						continue
-					}
-
-					valInfoArray[txNum] = &types.ValidationInfo{
-						Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
-						ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
-					}
-					break
-				} else {
-					c = &readCache{}
-					dbReads[key] = c
 					wg.Add(1)
-					go func(c *readCache, dbName, key string) {
-						if valInfoArray[txNum].Flag == types.Flag_VALID {
-							c.ver, c.err = v.db.GetVersion(dbName, key)
-							if !proto.Equal(r.Version, c.ver) {
+					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
+						c.wg.Wait()
+						if valInfoArray[txNum].Flag == types.Flag_VALID && c.err == nil {
+							if !proto.Equal(expectedVer, c.ver) {
 								valInfoArray[txNum] = &types.ValidationInfo{
 									Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
 									ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
@@ -674,12 +663,43 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 							}
 						}
 						wg.Done()
-					}(c, dbName, key)
+					}(txNum, c, dbName, key, ver)
+				} else {
+					c = &readCache{}
+					c.wg.Add(1)
+					wg.Add(1)
+					dbReads[key] = c
+					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
+						c.ver, c.err = v.db.GetVersion(dbName, key)
+						c.wg.Done()
+
+						if c.err != nil {
+							atomic.StorePointer(&reportedError, unsafe.Pointer(&c.err))
+						}
+
+						if valInfoArray[txNum].Flag == types.Flag_VALID && c.err == nil {
+							if !proto.Equal(expectedVer, c.ver) {
+								valInfoArray[txNum] = &types.ValidationInfo{
+									Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
+									ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
+								}
+							}
+						}
+
+						wg.Done()
+					}(txNum, c, dbName, key, ver)
 				}
 			}
 		}
 	}
 	wg.Wait()
+
+	errPtr := atomic.LoadPointer(&reportedError)
+	if errPtr != nil {
+		return *(*error)(errPtr)
+	} else {
+		return nil
+	}
 }
 
 func (v *dataTxValidator) mvccValidation(dbName string, txOps *types.DBOperation, pendingOps *pendingOperations) (*types.ValidationInfo, error) {

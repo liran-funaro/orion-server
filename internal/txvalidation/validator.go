@@ -102,7 +102,9 @@ func (v *Validator) ValidateBlock(block *types.Block) ([]*types.ValidationInfo, 
 			return nil, errors.WithMessage(err, "error while validating data transaction")
 		}
 
-		v.dataTxValidator.parallelReadMvccValidation(valInfoArray, dataTxEnvs)
+		if err = v.dataTxValidator.parallelReadMvccValidation(valInfoArray, dataTxEnvs); err != nil {
+			return nil, errors.WithMessage(err, "error while validating data transaction's read set")
+		}
 		pendingOps := newPendingOperations()
 		for txNum, txEnv := range dataTxEnvs {
 			if valInfoArray[txNum].Flag != types.Flag_VALID {
@@ -354,6 +356,7 @@ func (v *Validator) parallelSigValidation(dataTxEnvs []*types.DataTxEnvelope) ([
 type readCache struct {
 	ver *types.Version
 	err error
+	wg  sync.WaitGroup
 }
 
 type pendingOperations struct {

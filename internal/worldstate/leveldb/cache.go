@@ -30,11 +30,12 @@ func newCache(dataCacheSizeMBs int) *cache {
 func (c *cache) getState(namespace, key string) (*types.ValueWithMetadata, error) {
 	cacheKey := constructCacheKey(namespace, key)
 
-	if !c.dataCache.Has(cacheKey) {
+	valBytes, has := c.dataCache.HasGet(nil, cacheKey)
+	if !has {
 		return nil, nil
 	}
+
 	cacheValue := &types.ValueWithMetadata{}
-	valBytes := c.dataCache.Get(nil, cacheKey)
 	if err := proto.Unmarshal(valBytes, cacheValue); err != nil {
 		return nil, err
 	}

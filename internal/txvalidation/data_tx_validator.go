@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
-	"unsafe"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/orion-server/internal/identity"
@@ -626,10 +624,12 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 	valInfoArray []*types.ValidationInfo, dataTxEnvs []*types.DataTxEnvelope,
 ) error {
 	reads := make(map[string]map[string]*readCache)
-	var reportedError unsafe.Pointer
+	errorChan := make(chan error)
 
-	wg := sync.WaitGroup{}
 	for txNum, txEnv := range dataTxEnvs {
+		if valInfoArray[txNum].Flag != types.Flag_VALID {
+			continue
+		}
 		for _, txOps := range txEnv.Payload.DbOperations {
 			dbName := txOps.DbName
 			dbReads, ok := reads[dbName]
@@ -639,65 +639,73 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 			}
 
 			for _, r := range txOps.DataReads {
-				errPtr := atomic.LoadPointer(&reportedError)
-				if errPtr != nil {
-					return *(*error)(errPtr)
+				key := r.Key
+				if _, ok := dbReads[key]; ok {
+					continue
 				}
+
+				c := &readCache{
+					dbName: dbName,
+					key:    key,
+				}
+				c.wg.Add(1)
+				dbReads[key] = c
+				go func(txNum int, c *readCache) {
+					defer c.wg.Done()
+					c.ver, c.err = v.db.GetVersion(c.dbName, c.key)
+					if c.err != nil {
+						v.logger.Errorf("error validating signatures in tx number %d, error: %s", txNum, c.err)
+						defer func() {
+							// Ignore panic when errorChan is closed
+							recover()
+						}()
+						errorChan <- c.err
+					}
+				}(txNum, c)
+			}
+		}
+	}
+
+	wg := sync.WaitGroup{}
+	for txNum, txEnv := range dataTxEnvs {
+		for _, txOps := range txEnv.Payload.DbOperations {
+			for _, r := range txOps.DataReads {
 				if valInfoArray[txNum].Flag != types.Flag_VALID {
 					continue
 				}
 
-				key := r.Key
-				ver := r.Version
-				c, ok := dbReads[key]
-				if ok {
-					wg.Add(1)
-					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
-						defer wg.Done()
-						c.wg.Wait()
-						if valInfoArray[txNum].Flag == types.Flag_VALID && c.err == nil {
-							if !proto.Equal(expectedVer, c.ver) {
-								valInfoArray[txNum] = &types.ValidationInfo{
-									Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
-									ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
-								}
-							}
-						}
-					}(txNum, c, dbName, key, ver)
-				} else {
-					c = &readCache{}
-					c.wg.Add(1)
-					wg.Add(1)
-					dbReads[key] = c
-					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
-						defer wg.Done()
-						c.ver, c.err = v.db.GetVersion(dbName, key)
-						c.wg.Done()
+				wg.Add(1)
+				go func(txNum int, c *readCache, expectedVer *types.Version) {
+					defer wg.Done()
+					if c == nil {
+						panic("all reads keys should be in the map")
+					}
 
-						if c.err != nil {
-							atomic.StorePointer(&reportedError, unsafe.Pointer(&c.err))
-						}
-
-						if valInfoArray[txNum].Flag == types.Flag_VALID && c.err == nil {
-							if !proto.Equal(expectedVer, c.ver) {
-								valInfoArray[txNum] = &types.ValidationInfo{
-									Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
-									ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + r.Key + "] in database [" + dbName + "] changed",
-								}
-							}
-						}
-					}(txNum, c, dbName, key, ver)
-				}
+					c.wg.Wait()
+					if valInfoArray[txNum].Flag != types.Flag_VALID || c.err != nil {
+						return
+					}
+					if proto.Equal(expectedVer, c.ver) {
+						return
+					}
+					valInfoArray[txNum] = &types.ValidationInfo{
+						Flag:            types.Flag_INVALID_MVCC_CONFLICT_WITH_COMMITTED_STATE,
+						ReasonIfInvalid: "mvcc conflict has occurred as the committed state for the key [" + c.key + "] in database [" + c.dbName + "] changed",
+					}
+				}(txNum, reads[txOps.DbName][r.Key], r.Version)
 			}
 		}
 	}
-	wg.Wait()
 
-	errPtr := atomic.LoadPointer(&reportedError)
-	if errPtr != nil {
-		return *(*error)(errPtr)
-	} else {
-		return nil
+	go func() {
+		wg.Wait()
+		errorChan <- nil
+	}()
+
+	select {
+	case err := <-errorChan:
+		close(errorChan)
+		return err
 	}
 }
 

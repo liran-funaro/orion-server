@@ -98,13 +98,28 @@ func (v *Validator) ValidateBlock(block *types.Block) ([]*types.ValidationInfo, 
 			return nil, err
 		}
 
-		if err = v.dataTxValidator.parallelValidation(dataTxEnvs, usersWithValidSigPerTX, valInfoArray); err != nil {
-			return nil, errors.WithMessage(err, "error while validating data transaction")
+		var wg sync.WaitGroup
+		var parallelValidErr error
+		var parallelMvccReadErr error
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			parallelValidErr = v.dataTxValidator.parallelValidation(dataTxEnvs, usersWithValidSigPerTX, valInfoArray)
+		}()
+		go func() {
+			defer wg.Done()
+			parallelMvccReadErr = v.dataTxValidator.parallelReadMvccValidation(valInfoArray, dataTxEnvs)
+		}()
+		wg.Wait()
+
+		if parallelValidErr != nil {
+			return nil, errors.WithMessage(parallelValidErr, "error while validating data transaction")
 		}
 
-		if err = v.dataTxValidator.parallelReadMvccValidation(valInfoArray, dataTxEnvs); err != nil {
-			return nil, errors.WithMessage(err, "error while validating data transaction's read set")
+		if parallelMvccReadErr != nil {
+			return nil, errors.WithMessage(parallelMvccReadErr, "error while validating data transaction's read set")
 		}
+
 		pendingOps := newPendingOperations()
 		for txNum, txEnv := range dataTxEnvs {
 			if valInfoArray[txNum].Flag != types.Flag_VALID {
@@ -354,9 +369,11 @@ func (v *Validator) parallelSigValidation(dataTxEnvs []*types.DataTxEnvelope) ([
 }
 
 type readCache struct {
-	ver *types.Version
-	err error
-	wg  sync.WaitGroup
+	dbName string
+	key    string
+	ver    *types.Version
+	err    error
+	wg     sync.WaitGroup
 }
 
 type pendingOperations struct {

@@ -653,6 +653,7 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 				if ok {
 					wg.Add(1)
 					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
+						defer wg.Done()
 						c.wg.Wait()
 						if valInfoArray[txNum].Flag == types.Flag_VALID && c.err == nil {
 							if !proto.Equal(expectedVer, c.ver) {
@@ -662,7 +663,6 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 								}
 							}
 						}
-						wg.Done()
 					}(txNum, c, dbName, key, ver)
 				} else {
 					c = &readCache{}
@@ -670,6 +670,7 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 					wg.Add(1)
 					dbReads[key] = c
 					go func(txNum int, c *readCache, dbName, key string, expectedVer *types.Version) {
+						defer wg.Done()
 						c.ver, c.err = v.db.GetVersion(dbName, key)
 						c.wg.Done()
 
@@ -685,8 +686,6 @@ func (v *dataTxValidator) parallelReadMvccValidation(
 								}
 							}
 						}
-
-						wg.Done()
 					}(txNum, c, dbName, key, ver)
 				}
 			}

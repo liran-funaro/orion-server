@@ -4,7 +4,6 @@ package blockstore
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"testing"
 
@@ -23,8 +22,7 @@ type testEnv struct {
 }
 
 func newTestEnv(t *testing.T) *testEnv {
-	storeDir, err := ioutil.TempDir("", "blockstore")
-	require.NoError(t, err)
+	storeDir := t.TempDir()
 
 	lc := &logger.Config{
 		Level:         "debug",
@@ -42,10 +40,6 @@ func newTestEnv(t *testing.T) *testEnv {
 
 	store, err := Open(c)
 	if err != nil {
-		if rmErr := os.RemoveAll(storeDir); rmErr != nil {
-			t.Errorf("error while removing directory %s, %v", storeDir, rmErr)
-		}
-
 		t.Fatalf("error while opening store on path %s, %v", storeDir, err)
 	}
 
@@ -57,10 +51,6 @@ func newTestEnv(t *testing.T) *testEnv {
 				if err := store.Close(); err != nil {
 					t.Errorf("error while closing the store %s, %v", storeDir, err)
 				}
-			}
-
-			if err := os.RemoveAll(storeDir); err != nil {
-				t.Fatalf("error while removing directory %s, %v", storeDir, err)
 			}
 		},
 	}
@@ -485,8 +475,8 @@ func createSampleUserTxBlock(blockNumber uint64, prevBlockBaseHash []byte, prevB
 				LastCommittedBlockHash: prevBlockHash,
 				LastCommittedBlockNum:  blockNumber - 1,
 			},
-			TxMerkelTreeRootHash:    []byte(fmt.Sprintf("treehash-%d", blockNumber-1)),
-			StateMerkelTreeRootHash: []byte(fmt.Sprintf("statehash-%d", blockNumber-1)),
+			TxMerkleTreeRootHash:    []byte(fmt.Sprintf("treehash-%d", blockNumber-1)),
+			StateMerkleTreeRootHash: []byte(fmt.Sprintf("statehash-%d", blockNumber-1)),
 			ValidationInfo: []*types.ValidationInfo{
 				{
 					Flag: types.Flag_VALID,
@@ -519,8 +509,8 @@ func createSampleDataTxBlock(blockNumber uint64, prevBlockBaseHash []byte, prevB
 				LastCommittedBlockHash: prevBlockHash,
 				LastCommittedBlockNum:  blockNumber - 1,
 			},
-			TxMerkelTreeRootHash:    []byte(fmt.Sprintf("treehash-%d", blockNumber-1)),
-			StateMerkelTreeRootHash: []byte(fmt.Sprintf("statehash-%d", blockNumber-1)),
+			TxMerkleTreeRootHash:    []byte(fmt.Sprintf("treehash-%d", blockNumber-1)),
+			StateMerkleTreeRootHash: []byte(fmt.Sprintf("statehash-%d", blockNumber-1)),
 			ValidationInfo:          []*types.ValidationInfo{},
 		},
 	}

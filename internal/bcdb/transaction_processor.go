@@ -183,7 +183,7 @@ func newTransactionProcessor(conf *txProcessorConfig) (*transactionProcessor, er
 	}
 
 	// We disable the MPTrie after we know what the cluster config is. It is enabled by default.
-	if clusterConfig.LedgerConfig != nil && clusterConfig.LedgerConfig.StateMerkelPatriciaTrieDisabled {
+	if clusterConfig.GetLedgerConfig() != nil && clusterConfig.LedgerConfig.StateMerklePatriciaTrieDisabled {
 		conf.stateTrieStore.SetDisabled(true)
 	}
 
@@ -430,7 +430,7 @@ func PrepareBootstrapConfigTx(conf *config.Configurations) (*types.ConfigTxEnvel
 			},
 		},
 		LedgerConfig: &types.LedgerConfig{
-			StateMerkelPatriciaTrieDisabled: conf.SharedConfig.Ledger.StateMerklePatriciaTrieDisabled,
+			StateMerklePatriciaTrieDisabled: conf.SharedConfig.Ledger.StateMerklePatriciaTrieDisabled,
 		},
 	}
 

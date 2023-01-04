@@ -68,7 +68,7 @@ func (c *committer) commitBlock(block *types.Block) error {
 		panic(err)
 	}
 	// Update block with state trie root
-	block.Header.StateMerkelTreeRootHash = stateTrieRootHash
+	block.Header.StateMerkleTreeRootHash = stateTrieRootHash
 	utils.Stats.UpdateStateTrieUpdateTime(time.Since(start))
 
 	start = time.Now()

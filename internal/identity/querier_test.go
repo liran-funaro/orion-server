@@ -6,17 +6,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
-	"io/ioutil"
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/orion-server/internal/worldstate"
 	"github.com/hyperledger-labs/orion-server/internal/worldstate/leveldb"
 	"github.com/hyperledger-labs/orion-server/pkg/logger"
 	"github.com/hyperledger-labs/orion-server/pkg/server/testutils"
 	"github.com/hyperledger-labs/orion-server/pkg/types"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,8 +35,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	logger, err := logger.New(c)
 	require.NoError(t, err)
 
-	dir, err := ioutil.TempDir("/tmp", "committer")
-	require.NoError(t, err)
+	dir := t.TempDir()
 
 	dbPath := filepath.Join(dir, "leveldb")
 	db, err := leveldb.Open(
@@ -48,19 +45,12 @@ func newTestEnv(t *testing.T) *testEnv {
 		},
 	)
 	if err != nil {
-		if rmErr := os.RemoveAll(dir); rmErr != nil {
-			t.Errorf("error while removing directory %s, %v", dir, rmErr)
-		}
 		t.Fatalf("error while creating leveldb, %v", err)
 	}
 
 	cleanup := func() {
 		if err := db.Close(); err != nil {
 			t.Errorf("error while closing the db instance, %v", err)
-		}
-
-		if err := os.RemoveAll(dir); err != nil {
-			t.Fatalf("error while removing directory %s, %v", dir, err)
 		}
 	}
 
@@ -247,24 +237,6 @@ func TestQuerier(t *testing.T) {
 				require.True(t, proto.Equal(sampleMetadata.Version, ver))
 			})
 
-			t.Run("Read and Write Access on the User", func(t *testing.T) {
-				canRead, err := env.q.HasReadAccessOnTargetUser("user1", tt.userID)
-				require.NoError(t, err)
-				require.True(t, canRead)
-
-				canRead, err = env.q.HasReadWriteAccessOnTargetUser("user1", tt.userID)
-				require.NoError(t, err)
-				require.False(t, canRead)
-
-				canRead, err = env.q.HasReadAccessOnTargetUser("user2", tt.userID)
-				require.NoError(t, err)
-				require.True(t, canRead)
-
-				canRead, err = env.q.HasReadWriteAccessOnTargetUser("user2", tt.userID)
-				require.NoError(t, err)
-				require.True(t, canRead)
-			})
-
 			t.Run("GetCertificate()", func(t *testing.T) {
 				cert, err := env.q.GetCertificate(tt.userID)
 				require.NoError(t, err)
@@ -350,15 +322,4 @@ func TestQuerierNonExistingUser(t *testing.T) {
 		require.False(t, perm)
 	})
 
-	t.Run("HasReadAccessOnTargetUser returns UserNotFoundErr", func(t *testing.T) {
-		perm, err := env.q.HasReadAccessOnTargetUser("user1", "nouser")
-		require.EqualError(t, err, "the user [nouser] does not exist")
-		require.False(t, perm)
-	})
-
-	t.Run("HasReadWriteAccessOnTargetUser returns UserNotFoundErr", func(t *testing.T) {
-		perm, err := env.q.HasReadWriteAccessOnTargetUser("user1", "nouser")
-		require.EqualError(t, err, "the user [nouser] does not exist")
-		require.False(t, perm)
-	})
 }

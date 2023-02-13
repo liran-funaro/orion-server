@@ -25,6 +25,8 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 )
 
+require github.com/orcaman/concurrent-map/v2 v2.0.1
+
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
